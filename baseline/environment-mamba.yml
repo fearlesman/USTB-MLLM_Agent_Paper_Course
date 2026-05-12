@@ -1,0 +1,31 @@
+# Lightweight env for AV-SpeakerBench (API eval + HF datasets). Works on Windows/Linux/macOS.
+# Create:   mamba env create -f environment-mamba.yml
+# Activate: mamba activate av-speakerbench
+# CPU-only PyTorch (smaller): after create, run:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Then replace the CUDA build if pip installed a GPU wheel by default.
+#
+# Windows: if `mamba run -n av-speakerbench ...` mis-resolves PATH, use:
+#   mamba activate av-speakerbench
+#   python main.py --model_name ... --data_path ...
+
+name: av-speakerbench
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - torchaudio
+      - datasets>=2.14.0
+      - huggingface-hub>=0.20.0
+      - certifi>=2024.0.0
+      - moviepy>=2.0
+      - imageio-ffmpeg>=0.4.0
+      - python-dotenv>=1.0.0
+      - dashscope>=1.20.0
+      - openai>=1.52.0
+      - google-genai>=1.0.0
+      - tqdm>=4.65.0
