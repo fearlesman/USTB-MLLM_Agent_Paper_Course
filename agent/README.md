@@ -1,10 +1,10 @@
 # Multimodal Agent track (`agent/`)
 
-This tree is a **working copy** of the AV-SpeakerBench harness plus Agent-oriented extensions: **artifact isolation**, **per-question JSONL traces**, and a **stub orchestrator** (`orchestrator/`) for Skills/Tools.
+This tree is a **working copy** of the AV-SpeakerBench harness plus Agent-oriented extensions: **artifact isolation**, **per-question JSONL traces**, and an active orchestrator (`orchestrator/`) for Skills/Tools.
 
 **Dataset** stays at the repo root **`Holistic_AVQA_bench/`** (or **`AV_SPEAKERBENCH_DATA_ROOT`**). Paths resolve via [`dataset/paths.py`](dataset/paths.py).
 
-Smoke (1 question, Skill inject + Tools, loads repo-root ``.env``):
+Smoke (no API/GPU call; verifies prompt routing, parity mode, and stable prompt hashes):
 
 ```bash
 python agent/scripts/smoke_agent_one.py
@@ -42,21 +42,44 @@ python main.py ...
 
 ### Trace JSONL schema (one line per question)
 
-- `eval_track`, `question_id`, `video_id`, `task_id`, `category`, `sub_category`
+- `question_id`, `video_id`, `task_id`, `category`, `sub_category`
+- `orchestrator_ran`, `skills_disabled`, `skill_inject_requested`, `agent_evidence_injected`
+- `original_prompt_fp`, `agent_prompt_fp`, `agent_prompt_changed`
 - `skills_invoked` — ordered status tags per registered Skill (e.g. `meta_banner:skipped_inject_disabled`, `anchor_phrase_hints:injected`) unless `AV_SPEAKERBENCH_SKILLS=off`
 - `bottleneck_tags` — design-time hooks (`perception_pending`, `alignment_pending`, **`evidence_synthetic`** for stub ASR, `stub_backend`, etc.)
 - `errors` — list of `{kind, detail}` dicts
-- `infer_wall_ms`, `prompt_fp`, `matched`, `parsed_answer`, `llm_response_empty`
+- `infer_wall_ms`, `reused_cache`, `matched`, `parsed_answer`, `llm_response_empty`
+
+Per-question records additionally keep `question_prompt` (baseline MC prompt), `agent_model_prompt` (model-visible prompt), both prompt fingerprints, `agent_prompt_changed`, `agent_evidence_injected`, Skill tags, bottleneck tags, and orchestrator errors.
 
 ### Skills gate / env (operational)
 
-- **`AV_SPEAKERBENCH_SKILLS=off`** — orchestrator returns LM-only prep (pipeline skipped).
-- **`AV_SPEAKERBENCH_SKILL_INJECT=1`** (or `true`/`yes`) — append Skill blocks to the MC prompt; **omit or unset for LM-only parity** on the MC stem (skills may still run for trace unless `SKILLS=off`).
+- **Skills off:** `AV_SPEAKERBENCH_SKILLS=off` skips the Skill pipeline. The model-visible prompt is the baseline MC prompt and records mark `agent_skills_disabled=true`.
+- **Traced parity:** leave `AV_SPEAKERBENCH_SKILLS` unset and leave `AV_SPEAKERBENCH_SKILL_INJECT` unset. The orchestrator runs and records Skill tags, but `agent_model_prompt == question_prompt`.
+- **Evidence-injected active agent:** set **`AV_SPEAKERBENCH_SKILL_INJECT=1`** (or `true`/`yes`). Skill blocks are appended under `Structured_skill_evidence` and `agent_prompt_changed=true` when at least one Skill injects evidence.
 - **`AV_SPEAKERBENCH_SKILLS_ALLOWLIST`** — comma-separated skill ids, or `all`/empty for full registry **subject to triggers** (see `skills/triggers.py` and the **Task → Skill → Tool matrix** below). Registered ids: `meta_banner`, `clip_span_meta`, `anchor_phrase_hints`, `media_clip_facts`, `speaker_turn_proxy`, `asr_word_lane`, `anchor_quote_time`, `anchor_window_asr`, `lexical_asr_bridge`, `diar_binding`, `turn_order_sheet`, `speak_duration_sheet`, `f0_rank_shortlist`, `rate_words_per_sec`, `overlap_split`, `prosody_discrete`, `moment_refine`, `viz_people_anchor`, `visual_clip_meta`, `visual_anchor_ground`.
 - **`AV_SPEAKERBENCH_SKILLS_TRIGGER_MODE`** — `auto` (default) or **`all`** (force every Skill payload for audits).
 - **`AV_SPEAKERBENCH_ALLOW_SYNTHETIC_ASR`** — default **off**; when off, **`AV_SPEAKERBENCH_STUB_ASR_TEXT`** is never injected and trace may tag missing synthetic rows. Smoke script defaults allow=1 for stub demos only.
 - **Prompt fusion:** **`AV_SPEAKERBENCH_EVIDENCE_PLACEMENT=tail`** (default) vs **`both`** — `both` prepends `AV_SPEAKERBENCH_EVIDENCE_PREFIX_TEXT` or the default grounding sentence before the MC stem (structured evidence remains after the stem).
 - **Diarization:** **`AV_SPEAKERBENCH_DIAR_BACKEND=stub`** (default) vs **`pyannote`** (local `pyannote.audio` + `HF_TOKEN` / `HUGGINGFACE_HUB_TOKEN`) vs **`pyannote_api`** (cloud only). If `DIAR_BACKEND=pyannote` and **`PYANNOTE_API_KEY`** is set, the [pyannoteAI API](https://docs.pyannote.ai/quickstart) is used ([upload + diarize](https://docs.pyannote.ai/tutorials/how-to-upload-files)); optional `PYANNOTE_API_BASE`, `AV_SPEAKERBENCH_PYANNOTE_API_POLL_S`, `AV_SPEAKERBENCH_PYANNOTE_API_MAX_WAIT_S`.
+
+### Minimal ablation recipe
+
+Use the same split and seed for all three runs.
+
+```bash
+# Baseline reference
+python baseline/main.py --model_name Qwen3-Omni-3B --use_local_metadata --sample_fraction 0.02 --sample_seed 0
+
+# Agent LM-only parity: orchestrator runs, prompt unchanged
+unset AV_SPEAKERBENCH_SKILL_INJECT
+python main_agent.py --model_name Qwen3-Omni-3B --use_local_metadata --sample_fraction 0.02 --sample_seed 0
+
+# Active agent: evidence is model-visible
+AV_SPEAKERBENCH_SKILL_INJECT=1 python main_agent.py --model_name Qwen3-Omni-3B --use_local_metadata --sample_fraction 0.02 --sample_seed 0
+```
+
+Compare aggregate JSONs with `agent/scripts/compare_result_buckets.py`, then join `record/agent_trace_*.jsonl` to per-question records by `question_id` to inspect whether changed answers actually saw agent evidence.
 
 ### VAD (`tools/audio_vad.py`)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,8 +19,7 @@ def append_trace_record(path: str, record: dict[str, Any]) -> None:
 
 
 def prompt_fingerprint(prompt: str) -> str | None:
-    """Short stable hash placeholder (full SHA optional via ``hashlib`` if needed later)."""
+    """Short stable SHA-256 fingerprint for comparing model-visible prompts."""
     if not prompt:
         return None
-    return hex(hash(prompt) & ((1 << 64) - 1))[2:]
-
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
