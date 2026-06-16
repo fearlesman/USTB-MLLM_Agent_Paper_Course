@@ -6,7 +6,7 @@ Tool — **speaker diarization**: optional **pyannoteAI cloud API**, local **HF 
 
 Env:
 
-- ``AV_SPEAKERBENCH_DIAR_BACKEND`` — ``stub`` (default), ``pyannote``, ``pyannote_api`` (cloud only).
+- ``AV_SPEAKERBENCH_DIAR_BACKEND`` — ``auto`` (default), ``stub``, ``pyannote``, ``pyannote_api`` (cloud only).
 - **Cloud** (see `pyannoteAI quickstart <https://docs.pyannote.ai/quickstart>`_):
 
   - ``PYANNOTE_API_KEY`` — Bearer token; uploads WAV via ``/v1/media/input`` then ``/v1/diarize``.
@@ -16,7 +16,7 @@ Env:
 - **Local HF** (when ``DIAR_BACKEND=pyannote`` and **no** ``PYANNOTE_API_KEY``):
 
   - ``HF_TOKEN`` / ``HUGGINGFACE_HUB_TOKEN`` — auth for ``Pipeline.from_pretrained``.
-  - ``AV_SPEAKERBENCH_PYANNOTE_MODEL`` — default ``pyannote/speaker-diarization-3.1``.
+  - ``AV_SPEAKERBENCH_PYANNOTE_MODEL`` — default ``pyannote/speaker-diarization-community-1``.
 
 If ``DIAR_BACKEND=pyannote`` and ``PYANNOTE_API_KEY`` is set, the **cloud API** is used first (no local ``pyannote.audio`` weights).
 """
@@ -50,6 +50,25 @@ class DiarRunOutcome:
     backend: str
     duration_s: float
     errors: list[dict[str, Any]]
+
+
+def _select_diar_backend() -> str:
+    raw = os.getenv("AV_SPEAKERBENCH_DIAR_BACKEND", "auto").strip().lower()
+    aliases = {
+        "default": "auto",
+        "cloud": "pyannote_api",
+    }
+    raw = aliases.get(raw, raw)
+    if raw in ("pyannote", "pyannote_api", "stub"):
+        return raw
+    if os.getenv("PYANNOTE_API_KEY", "").strip():
+        return "pyannote_api"
+    try:
+        import pyannote.audio  # noqa: F401
+
+        return "pyannote"
+    except ImportError:
+        return "stub"
 
 
 def _http_request(
@@ -251,7 +270,7 @@ def diarize_wav_path(wav_path: str | Path) -> DiarRunOutcome:
     if not path.is_file():
         return DiarRunOutcome([], "none", 0.0, [{"kind": "file_missing", "detail": str(path)}])
 
-    backend = os.getenv("AV_SPEAKERBENCH_DIAR_BACKEND", "stub").strip().lower()
+    backend = _select_diar_backend()
 
     duration_s = 0.0
     try:
@@ -282,8 +301,8 @@ def diarize_wav_path(wav_path: str | Path) -> DiarRunOutcome:
     token: str | bool = token_raw
 
     model_id = (
-        os.getenv("AV_SPEAKERBENCH_PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1").strip()
-        or "pyannote/speaker-diarization-3.1"
+        os.getenv("AV_SPEAKERBENCH_PYANNOTE_MODEL", "pyannote/speaker-diarization-community-1").strip()
+        or "pyannote/speaker-diarization-community-1"
     )
     try:
         from pyannote.audio import Pipeline  # type: ignore[import-untyped]

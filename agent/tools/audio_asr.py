@@ -93,13 +93,10 @@ def mono_to_16k_f32(x: np.ndarray, sr: int) -> np.ndarray:
         y = F.resample(t, sr, 16000)
         return y.squeeze(0).numpy().astype(np.float32)
     except ImportError:
-        ratio = int(round(sr / 16000))
-        if ratio <= 1 or abs(sr / 16000 - ratio) > 0.05:
-            raise RuntimeError(
-                f"samplerate {sr}≠16kHz and torchaudio missing — install torchaudio or use 16k clips"
-            )
-        x_down = x[::ratio]
-        return np.asarray(x_down, dtype=np.float32)
+        n_out = max(1, int(round(len(x) * 16000.0 / max(sr, 1))))
+        xp = np.linspace(0.0, 1.0, num=len(x), endpoint=False, dtype=np.float32)
+        xq = np.linspace(0.0, 1.0, num=n_out, endpoint=False, dtype=np.float32)
+        return np.interp(xq, xp, x).astype(np.float32)
 
 
 def _select_backend(explicit: str) -> str:

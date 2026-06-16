@@ -35,4 +35,19 @@ Outputs (`result/`, `record/`) are created relative to the **current working dir
 
 ## Environment
 
-See root **`../README.md`** and `environment.yml` in this folder.
+Use the **baseline layer** only:
+
+```bash
+mamba env create -f environment-mamba.yml
+mamba activate av-speakerbench
+```
+
+`environment.yml` and `environment-mamba.yml` now describe the same portable baseline env. If you already have a Python env, install the same deps with:
+
+```bash
+pip install -r requirements-baseline.txt
+```
+
+This baseline layer does **not** include the heavier agent-only backends such as WhisperX, pyannote.audio, Ultralytics, or Silero VAD. Those live under [`../agent/requirements-agent.txt`](../agent/requirements-agent.txt) and [`../agent/environment-mamba.yml`](../agent/environment-mamba.yml).
+
+For local open-model inference, install model-specific extras separately. The current Qwen3-Omni code path expects `transformers==4.42.2`, `peft==0.13.2`, and related runtime helpers such as `accelerate`, `sentencepiece`, plus the `qwen_omni_utils` module imported by [`model/open_model/Qwen3Omni/inference.py`](model/open_model/Qwen3Omni/inference.py).

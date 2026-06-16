@@ -1,0 +1,48 @@
+# Agent-track environment for AV-SpeakerBench (Skills / Tools / traces).
+# Create:   mamba env create -f agent/environment-mamba.yml
+# Activate: mamba activate av-speakerbench-agent
+#
+# Windows:
+#   mamba activate av-speakerbench-agent
+#   python agent/scripts/smoke_agent_one.py
+#
+# Notes:
+# - This file is intentionally separate from baseline/environment-mamba.yml.
+# - It is a full standalone env for the agent track.
+# - For an incremental upgrade path, use agent/requirements-agent.txt on top of
+#   the baseline environment instead of creating this second env.
+# - It includes the current P0 agent backends: Silero VAD, faster-whisper,
+#   WhisperX, pyannote.audio, and Ultralytics.
+
+name: av-speakerbench-agent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - ffmpeg
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - torchaudio
+      - datasets>=2.14.0
+      - huggingface-hub>=0.20.0
+      - certifi>=2024.0.0
+      - moviepy>=2.0
+      - imageio-ffmpeg>=0.4.0
+      - python-dotenv>=1.0.0
+      - dashscope>=1.20.0
+      - openai>=1.52.0
+      - google-genai>=1.0.0
+      - tqdm>=4.65.0
+      - matplotlib>=3.8.0
+      - numpy>=2.1.0
+      - pandas>=2.2.3
+      - numexpr>=2.10.2
+      - bottleneck>=1.4.2
+      - opencv-python>=4.11.0
+      - faster-whisper>=1.2.0
+      - silero-vad>=6.2.0
+      - ultralytics>=8.3.0
+      - whisperx>=3.8.6
+      - pyannote.audio>=3.4.0

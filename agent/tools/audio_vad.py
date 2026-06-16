@@ -1,8 +1,11 @@
 """
 Speech-activity segmentation (Tool T1): anchor windows for ASR / moment / overlap Skills.
 
-Default backend is **energy + adaptive noise floor** on decoded PCM (via ``torchaudio``).
-Swap later with WebRTC VAD / Silero by implementing a second backend and selecting via env.
+Backends:
+
+- ``auto`` *(default)* — prefer **Silero VAD** when installed, else fall back to energy VAD.
+- ``silero`` — `silero-vad <https://github.com/snakers4/silero-vad>`_.
+- ``energy`` — adaptive-noise-floor frame-energy VAD on decoded PCM.
 """
 
 from __future__ import annotations
@@ -50,6 +53,26 @@ def _parse_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _select_vad_backend() -> str:
+    raw = os.getenv("AV_SPEAKERBENCH_VAD_BACKEND", "auto").strip().lower()
+    aliases = {
+        "sv": "silero",
+        "silero_vad": "silero",
+        "default": "auto",
+    }
+    raw = aliases.get(raw, raw)
+    if raw in ("energy", "energy_vad"):
+        return "energy"
+    if raw == "silero":
+        return "silero"
+    try:
+        import silero_vad  # noqa: F401
+
+        return "silero"
+    except ImportError:
+        return "energy"
 
 
 def _energy_vad_mono(
@@ -131,6 +154,72 @@ def _energy_vad_mono(
     return out
 
 
+def _resample_to_16k_f32(x: np.ndarray, sr: int) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32).ravel()
+    if sr == 16000:
+        return x
+    try:
+        import torch
+        import torchaudio.functional as F
+
+        t = torch.from_numpy(x).unsqueeze(0)
+        y = F.resample(t, sr, 16000)
+        return y.squeeze(0).cpu().numpy().astype(np.float32)
+    except ImportError:
+        n_out = max(1, int(round(len(x) * 16000.0 / max(sr, 1))))
+        xp = np.linspace(0.0, 1.0, num=len(x), endpoint=False, dtype=np.float32)
+        xq = np.linspace(0.0, 1.0, num=n_out, endpoint=False, dtype=np.float32)
+        return np.interp(xq, xp, x).astype(np.float32)
+
+
+@lru_cache(maxsize=2)
+def _silero_model():  # type: ignore[no-untyped-def]
+    from silero_vad import load_silero_vad
+
+    return load_silero_vad()
+
+
+def _silero_vad_mono(
+    x: np.ndarray,
+    sr: int,
+    *,
+    min_segment_s: float,
+    max_merge_gap_s: float,
+) -> list[VadSegment]:
+    import torch
+    from silero_vad import get_speech_timestamps
+
+    wav_16k = _resample_to_16k_f32(x, sr)
+    model = _silero_model()
+    threshold = _parse_float("AV_SPEAKERBENCH_VAD_SILERO_THRESHOLD", 0.5)
+    speech_pad_ms = _parse_int("AV_SPEAKERBENCH_VAD_SILERO_SPEECH_PAD_MS", 60)
+    min_speech_ms = max(20, int(round(max(0.02, min_segment_s) * 1000.0)))
+    min_silence_ms = max(20, int(round(max(0.02, max_merge_gap_s) * 1000.0)))
+    spans = get_speech_timestamps(
+        torch.from_numpy(wav_16k),
+        model,
+        sampling_rate=16000,
+        threshold=threshold,
+        min_speech_duration_ms=min_speech_ms,
+        min_silence_duration_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+        return_seconds=False,
+    )
+    out: list[VadSegment] = []
+    dur = float(len(wav_16k) / 16000.0)
+    for seg in spans:
+        try:
+            a = float(seg.get("start", 0)) / 16000.0
+            b = float(seg.get("end", 0)) / 16000.0
+        except (AttributeError, TypeError, ValueError):
+            continue
+        a = max(0.0, a)
+        b = min(dur, b)
+        if b > a:
+            out.append(VadSegment(t0=a, t1=b, conf=None))
+    return out
+
+
 def _load_waveform_mono(path: str) -> tuple[np.ndarray, int]:
     tor_err: Exception | None = None
     try:
@@ -175,6 +264,7 @@ def load_waveform_mono(path: str | Path) -> tuple[np.ndarray, int]:
 def _vad_cached(
     resolved_path: str,
     mtime: float,
+    backend_choice: str,
     frame_ms: float,
     hop_ms: float,
     margin_db: float,
@@ -202,16 +292,54 @@ def _vad_cached(
         dur = float(len(x) / max(sr, 1))
         errors.append(("truncated", f"analyzed_first_s={max_dur}"))
 
-    segs = _energy_vad_mono(
-        x,
-        sr,
-        frame_ms=frame_ms,
-        hop_ms=hop_ms,
-        energy_margin_db=margin_db,
-        min_segment_s=min_seg,
-        max_merge_gap_s=merge_gap,
-        noise_percentile=noise_pct,
-    )
+    segs: list[VadSegment]
+    if backend_choice == "silero":
+        try:
+            segs = _silero_vad_mono(
+                x,
+                sr,
+                min_segment_s=min_seg,
+                max_merge_gap_s=merge_gap,
+            )
+            backend = "silero_vad"
+        except ImportError as e:
+            errors.append(("vad_import_missing", f"silero_vad:{e}"))
+            segs = _energy_vad_mono(
+                x,
+                sr,
+                frame_ms=frame_ms,
+                hop_ms=hop_ms,
+                energy_margin_db=margin_db,
+                min_segment_s=min_seg,
+                max_merge_gap_s=merge_gap,
+                noise_percentile=noise_pct,
+            )
+            backend = "energy_vad_fallback"
+        except Exception as e:  # noqa: BLE001
+            errors.append(("vad_backend_failed", f"silero:{e}"))
+            segs = _energy_vad_mono(
+                x,
+                sr,
+                frame_ms=frame_ms,
+                hop_ms=hop_ms,
+                energy_margin_db=margin_db,
+                min_segment_s=min_seg,
+                max_merge_gap_s=merge_gap,
+                noise_percentile=noise_pct,
+            )
+            backend = "energy_vad_fallback"
+    else:
+        segs = _energy_vad_mono(
+            x,
+            sr,
+            frame_ms=frame_ms,
+            hop_ms=hop_ms,
+            energy_margin_db=margin_db,
+            min_segment_s=min_seg,
+            max_merge_gap_s=merge_gap,
+            noise_percentile=noise_pct,
+        )
+        backend = "energy_vad"
     tup = tuple((s.t0, s.t1, s.conf) for s in segs)
     return tup, dur, sr, backend, tuple(errors)
 
@@ -236,6 +364,7 @@ def vad_segments_from_wav_path(path: str | Path) -> VadRunOutcome:
             errors=[{"kind": "file_missing", "detail": str(p)}],
         )
 
+    backend_choice = _select_vad_backend()
     frame_ms = _parse_float("AV_SPEAKERBENCH_VAD_FRAME_MS", 25.0)
     hop_ms = _parse_float("AV_SPEAKERBENCH_VAD_HOP_MS", 10.0)
     margin_db = _parse_float("AV_SPEAKERBENCH_VAD_MARGIN_DB", 3.0)
@@ -249,6 +378,7 @@ def vad_segments_from_wav_path(path: str | Path) -> VadRunOutcome:
     tup, dur, sr, backend, err_tuples = _vad_cached(
         str(p),
         mtime,
+        backend_choice,
         frame_ms,
         hop_ms,
         margin_db,

@@ -1,0 +1,19 @@
+# Install from repository root:
+#   pip install -r agent/requirements-agent.txt
+#
+# Intended usage:
+# - Start from the baseline environment.
+# - Add only the heavier agent-side tool backends when you need them.
+
+-r ../baseline/requirements-baseline.txt
+
+bottleneck>=1.4.2
+faster-whisper>=1.2.0
+numexpr>=2.10.2
+numpy>=2.1.0
+opencv-python>=4.11.0
+pandas>=2.2.3
+pyannote.audio>=3.4.0
+silero-vad>=6.2.0
+ultralytics>=8.3.0
+whisperx>=3.8.6

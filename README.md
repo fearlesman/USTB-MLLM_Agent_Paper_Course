@@ -34,11 +34,14 @@ TL;DR: AV-SpeakerBench evaluates multimodal large langague models (MLLMs) on spe
 - [Add Your Model](#add-your-model)
 - [Add your model to the leaderboard](#add-your-model-to-the-leaderboard)
 - [Outputs](#outputs)
+- [Agent Docs](#agent-docs)
 - [Citation](#citation)
 
 ## Repository layout (baseline vs agent fork)
 
 Benchmark **code** lives under **`baseline/`**; the **multimodal Agent** study (Skills, Tools, orchestration) lives under **`agent/`**. The checklist-style design note is **[`agent/docs/MM_AGENT_DESIGN.md`](agent/docs/MM_AGENT_DESIGN.md)**.
+
+For agent-side external-tool planning, see **[`agent/docs/AV_TOOL_SKILL_SURVEY.md`](agent/docs/AV_TOOL_SKILL_SURVEY.md)**.
 
 **Dataset clips and `test.csv` stay at [`Holistic_AVQA_bench/`](Holistic_AVQA_bench/) beside `baseline/`** (repository root default), unless you override with **`AV_SPEAKERBENCH_DATA_ROOT`** or **`--data_path`**.
 
@@ -89,9 +92,38 @@ We design each question so that solving it *requires* true audio–visual alignm
 
 
 ## Environment Setup
-- Core deps: `pip install huggingface-hub datasets "moviepy>=2.0" matplotlib`.
-- Install your model’s extras (e.g., `transformers`, `peft`, etc.).
-- Optional: set `HF_HOME` to control Hugging Face cache (see footer of `baseline/main.py` or repo-root ``main.py`` shim).
+Environment is split into a **baseline layer** and an **agent extension layer**.
+
+| Layer | Files | Use for |
+|------|------|------|
+| `baseline/` | [`baseline/environment.yml`](baseline/environment.yml), [`baseline/environment-mamba.yml`](baseline/environment-mamba.yml), [`baseline/requirements-baseline.txt`](baseline/requirements-baseline.txt) | Frozen benchmark harness (`python main.py ...`, `baseline/`) |
+| `agent/` | [`agent/environment-mamba.yml`](agent/environment-mamba.yml), [`agent/requirements-agent.txt`](agent/requirements-agent.txt) | Agent track (`python main_agent.py ...`, `agent/`) with Tools / Skills |
+
+Recommended setup paths:
+
+```bash
+# Baseline only
+mamba env create -f baseline/environment-mamba.yml
+mamba activate av-speakerbench
+```
+
+```bash
+# Upgrade the baseline env with agent-side tool backends
+pip install -r agent/requirements-agent.txt
+```
+
+```bash
+# Or create a separate standalone agent env
+mamba env create -f agent/environment-mamba.yml
+mamba activate av-speakerbench-agent
+```
+
+Notes:
+
+- [`baseline/environment.yml`](baseline/environment.yml) is now the **portable** baseline definition; it replaces the old machine-exported lockfile.
+- Agent extras include the current practical backends: **Silero VAD**, **faster-whisper**, **WhisperX**, **pyannote.audio**, and **Ultralytics**.
+- Some open-model paths still need model-specific extras. For local Qwen3-Omni, install the versions expected by [`baseline/model/open_model/__init__.py`](baseline/model/open_model/__init__.py): `transformers==4.42.2`, `peft==0.13.2`, plus runtime helpers such as `accelerate`, `sentencepiece`, and the `qwen_omni_utils` module required by [`baseline/model/open_model/Qwen3Omni/inference.py`](baseline/model/open_model/Qwen3Omni/inference.py).
+- Optional: set `HF_HOME` to control Hugging Face cache (see footer of `baseline/main.py` or repo-root `main.py` shim).
 
 ## Data
 Full layout and column definitions are documented in **`Holistic_AVQA_bench/README.md`** (same folder as the clips). Typical repo layout:
@@ -188,6 +220,12 @@ python scripts/plot_benchmark_results.py --results result/<model>.json --out_dir
 Pass multiple `--results` paths to emit grouped comparison charts (`level*_comparison.png`). Add `--csv` to write `results_summary.csv` under `--out_dir`.
 
 We have put the code for Gemini and Qwen 3-Omni 30B for you to replicate. For Gemini, please create an .env file and put the API key there. For Qwen 3-Omni 30B, please download the weight into the corresponding folder.
+
+## Agent Docs
+
+- [`agent/README.md`](agent/README.md) — agent track usage, env flags, trace schema, current Tool/Skill matrix.
+- [`agent/docs/MM_AGENT_DESIGN.md`](agent/docs/MM_AGENT_DESIGN.md) — bottlenecks, design principles, and evidence-driven Tool/Skill planning.
+- [`agent/docs/AV_TOOL_SKILL_SURVEY.md`](agent/docs/AV_TOOL_SKILL_SURVEY.md) — external AV multimodal tools and candidate skills mapped to this repo's architecture.
 
 ## Citation
 If you use this benchmark or code, please cite:

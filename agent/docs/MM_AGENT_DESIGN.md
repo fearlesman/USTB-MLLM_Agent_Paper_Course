@@ -42,20 +42,15 @@ Implementation can wrap existing models or APIs; the **Agent layer** owns compos
 
 | Skill (registry) | Tool module | Default backend | Targets footnote |
 |------------------|-------------|-----------------|------------------|
-| `meta_banner` | — | — | Echo `task_id` / category lines (always when inject on) |
 | `clip_span_meta` | [`../tools/benchmark_timecode.py`](../tools/benchmark_timecode.py) | — | Raw `start_time`/`end_time` plus parsed `start_s`/`end_s`/`span_s` (MM:SS) |
-| `anchor_phrase_hints` | — (stem regex) | — | Quoted fragments in stem; supports lexical ASR cohorts |
-| `media_clip_facts` | VAD or `wave`; [`../tools/audio_rms_meter.py`](../tools/audio_rms_meter.py); [`../tools/media_probe.py`](../tools/media_probe.py) | energy VAD; ffprobe when available | Clip stats; **RMS/peak/crest** on Speech Intensity rows (VAD speech union); **ffprobe** on combined MP4 when visual Skill does not already probe (see `triggers.py`) |
-| `speaker_turn_proxy` | [`../tools/audio_vad.py`](../tools/audio_vad.py) | energy VAD | `Speaker Counting`, `Speech Counting` — **burst count disclaimer** (not speaker IDs) |
 | `anchor_window_asr` | [`../tools/audio_asr.py`](../tools/audio_asr.py) | `auto` → faster_whisper / whisper / stub | `level 3: Speech Recognition, Speech Counting, Duration, Pitch, Rate, Intensity` (+ stem quotes); cite acc from your JSON |
 | `lexical_asr_bridge` | ASR + stem quotes | same as anchor ASR | Stem quotes ∩ ASR windows (normalized substring); tags `hits_injected` / `no_hits`; synthetic if stub backend |
-| — VAD (shared) | [`../tools/audio_vad.py`](../tools/audio_vad.py) | energy + torchaudio/wave | precondition for anchor ASR / overlap / prosody windows |
-| `diar_binding` | [`../tools/audio_diar.py`](../tools/audio_diar.py) | `stub`; optional `pyannote` + HF token | `level 3: Speaker Recognition, Speaker Counting`; mechanism: perception/binding |
-| `prosody_discrete` | [`../tools/audio_prosody.py`](../tools/audio_prosody.py) | energy / ZCR tertiles (heuristic) | `level 3: Speech Pitch / Rate / Intensity`; replaces raw-curve dump with bins |
-| `overlap_split` | (VAD stats in [`../skills/impl.py`](../skills/impl.py)) | same as VAD | `level 3: Speech/Speaker Counting, Speaker Recognition` cohort (see `skills/triggers.py`) |
-| `moment_refine` | VAD top windows | energy VAD | Activity / temporal `task_id` heuristics (`duration`, `activity`, `when`, …) |
-| `visual_clip_meta` | [`../tools/media_probe.py`](../tools/media_probe.py), file stats | ffprobe `auto` | Visual-centric / attribute-ish tasks; **per-path container probe** (visual + audiovisual clips) when ffprobe resolves |
-| `visual_anchor_ground` | — | **stub** pending detector/OCR | Visual-centric category only; Tool T7 backlog |
+| `asr_word_lane` | [`../tools/audio_asr_words.py`](../tools/audio_asr_words.py) | `auto` → whisperx / faster_whisper / stub | Word timestamps for quote alignment, counting, and speaker-linked transcript slices |
+| `anchor_quote_time` | [`../tools/audio_asr_words.py`](../tools/audio_asr_words.py) | same as word-lane ASR | First aligned timestamp for quoted phrase anchors in visual counting or quote-bounded tasks |
+| `diar_binding` | [`../tools/audio_diar.py`](../tools/audio_diar.py) | `auto`; optional `pyannote` / `pyannote_api` / `stub` | `level 3: Speaker Recognition, Speaker Counting`; mechanism: perception/binding |
+| `turn_order_sheet` | [`../tools/speech_turn_sheet.py`](../tools/speech_turn_sheet.py) | diar + word-lane merge | Ordered speaker-turn table for core speaker recognition and before/after questions |
+| `viz_people_anchor` | [`../tools/video_people_snap.py`](../tools/video_people_snap.py) | ffmpeg + optional Ultralytics detect/track | `level 3: Visual Counting`; quote-aligned anchor time plus detector or tracker counts |
+| — VAD (shared) | [`../tools/audio_vad.py`](../tools/audio_vad.py) | `auto` → Silero VAD / energy fallback | precondition for anchor ASR and localized quote evidence |
 
 Replace accuracies in Targets lines using `rank_buckets_from_result.py` on your saved `result/*.json` (§ Evidence-from-baseline).
 
@@ -109,7 +104,7 @@ The table below is **format-only**; replace accuracies by re-running the ranking
 |----------------------------|-------------------|----------------|------------|
 | `level 3: Speech Counting` | alignment + counting | VAD/diarization + ASR on anchor window | Structured transcript table; no long prose |
 | `level 3: Speaker Recognition` | perception / binding | Short diarization + optional face/id | Candidate speaker table tied to time |
-| `level 3: Speech Pitch` / `Speech Rate` | perception granularity | Pitch / rate features over anchor span | Discrete bins or short summary, not raw curves |
+| `level 3: Speech Pitch` / `Speech Rate` | perception granularity | Better aligned ASR / speaker spans first; avoid noisy proxy metrics by default | Compact timestamped evidence only |
 | High-accuracy buckets (e.g. Speaker Detection) | — | **Deprioritise** Skills unless co-occurring with weak tasks | Conditional trigger only |
 
 ## Model & resource inventory
